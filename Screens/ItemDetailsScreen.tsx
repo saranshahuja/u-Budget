@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { db } from "../firebaseConfiguration";
 import { auth } from "../firebaseConfiguration";
 import { collection, addDoc } from "firebase/firestore";
+import Slider from "@react-native-community/slider";
 
 const ItemDetailsScreen = ({
   route,
@@ -35,6 +36,32 @@ const ItemDetailsScreen = ({
     title: "",
     emoji: "📝",
   });
+  const [isSplit, setIsSplit] = useState(false);
+  const splitActionSheetRef = useRef<ActionSheetRef>(null);
+  const [splitUsers, setSplitUsers] = useState([
+    { id: 1, percentage: 100, amount: 0 },
+  ]);
+
+  const SPLIT_CHECKPOINTS = [
+    { value: 0, label: '0%' },
+    { value: 25, label: '25%' },
+    { value: 33.33, label: '33%' },
+    { value: 50, label: '50%' },
+    { value: 66.67, label: '67%' },
+    { value: 75, label: '75%' },
+    { value: 100, label: '100%' }
+  ];
+
+  const snapToNearestCheckpoint = (value: number): number => {
+    const closest = SPLIT_CHECKPOINTS.reduce((prev, curr) => {
+      return Math.abs(curr.value - value) < Math.abs(prev.value - value) ? curr : prev;
+    });
+
+    if (Math.abs(closest.value - value) < 2) {
+      return closest.value;
+    }
+    return value;
+  };
 
   const handleNumberPress = (num: string) => {
     if (num === ".") {
@@ -128,6 +155,95 @@ const ItemDetailsScreen = ({
     { title: "Tips", emoji: "🤝" },
   ];
 
+  const handleSplitPress = () => {
+    splitActionSheetRef.current?.show();
+    // Initialize the first user's amount
+    setSplitUsers([{ id: 1, percentage: 100, amount: parseFloat(amount) }]);
+  };
+
+  const handleSliderChange = (percentage: number, userId: number) => {
+    const snappedValue = snapToNearestCheckpoint(percentage);
+    const totalAmount = parseFloat(amount);
+    const otherUsers = splitUsers.filter(user => user.id !== userId);
+    const otherTotal = otherUsers.reduce((sum, user) => sum + user.percentage, 0);
+    
+    // Calculate remaining percentage available
+    const maxAllowedPercentage = 100 - otherTotal;
+    let finalPercentage = snappedValue;
+
+    // If sliding up and total would exceed 100%, reduce other users proportionally
+    if (otherTotal + finalPercentage > 100) {
+      const excess = (otherTotal + finalPercentage) - 100;
+      const reductionRatio = excess / otherTotal;
+      
+      const updatedUsers = splitUsers.map(user => {
+        if (user.id === userId) {
+          return {
+            ...user,
+            percentage: finalPercentage,
+            amount: (totalAmount * finalPercentage) / 100
+          };
+        } else {
+          const reducedPercentage = user.percentage * (1 - reductionRatio);
+          return {
+            ...user,
+            percentage: reducedPercentage,
+            amount: (totalAmount * reducedPercentage) / 100
+          };
+        }
+      });
+      
+      setSplitUsers(updatedUsers);
+    } else {
+      // Normal case when sliding down or when total is under 100%
+      const remainingPercentage = 100 - (otherTotal + finalPercentage);
+      
+      const updatedUsers = splitUsers.map(user => {
+        if (user.id === userId) {
+          return {
+            ...user,
+            percentage: finalPercentage,
+            amount: (totalAmount * finalPercentage) / 100
+          };
+        } else if (otherTotal > 0) {
+          // Distribute remaining percentage proportionally
+          const adjustedPercentage = user.percentage + 
+            (remainingPercentage * (user.percentage / otherTotal));
+          return {
+            ...user,
+            percentage: adjustedPercentage,
+            amount: (totalAmount * adjustedPercentage) / 100
+          };
+        }
+        return user;
+      });
+      
+      setSplitUsers(updatedUsers);
+    }
+  };
+
+  const handleAddUser = () => {
+    const totalAmount = parseFloat(amount);
+    const newUserCount = splitUsers.length + 1;
+    const equalPercentage = 100 / newUserCount;
+    
+    // Redistribute percentages equally among all users including the new one
+    const updatedUsers = splitUsers.map(user => ({
+      ...user,
+      percentage: equalPercentage,
+      amount: (totalAmount * equalPercentage) / 100
+    }));
+
+    setSplitUsers([
+      ...updatedUsers,
+      {
+        id: newUserCount,
+        percentage: equalPercentage,
+        amount: (totalAmount * equalPercentage) / 100
+      }
+    ]);
+  };
+
   const saveItem = () => {
     if (!auth.currentUser) {
       console.error("No user is signed in");
@@ -159,7 +275,8 @@ const ItemDetailsScreen = ({
       type: type.title,
       frequency: frequency,
       isRecurring: isRecurring,
-      isSplit: false,
+      isSplit: isSplit,
+      splitDetails: isSplit ? splitUsers : null,
       createdAt: new Date(),
       userId: auth.currentUser.uid,
     })
@@ -174,20 +291,20 @@ const ItemDetailsScreen = ({
   };
 
   return (
-    <View style={tw`flex-1 bg-white items-center justify-center`}>
+    <View style={tw`flex-1 bg-white items-center justify-around pb-10 pt-5`}>
       <View style={tw`flex-row justify-center w-full items-center px-4 pb-2`}>
         <TouchableOpacity
           style={tw`flex-row absolute left-0 justify-start w-full items-center px-4 pb-2`}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back-outline" size={24} color="black" />
+          <Ionicons name="chevron-back" size={24} color="black" />
           <Text style={tw`text-gray-600`}>Back</Text>
         </TouchableOpacity>
         <View style={tw`flex-row justify-center items-center`}>
           <Text
             style={[
               tw`text-center text-2xl text-gray-600`,
-              { fontFamily: "Sora-SemiBold" },
+              { fontFamily: "Sora-light" },
             ]}
           >
             Add{" "}
@@ -195,7 +312,7 @@ const ItemDetailsScreen = ({
           <Text
             style={[
               tw`text-center text-2xl text-black`,
-              { fontFamily: "Sora-SemiBold" },
+              { fontFamily: "Sora-light" },
             ]}
           >
             {type.title === "expense" ? "Expense" : "Income"}
@@ -222,7 +339,7 @@ const ItemDetailsScreen = ({
           tw`bg-gray-100 p-4 rounded-full border border-gray-200 shadow-md mb-8 w-95% self-center`,
           { fontFamily: "Sora-Regular" },
         ]}
-        placeholder="Comment"
+        placeholder="Add in a message"
         value={comment}
         onChangeText={setComment}
       />
@@ -237,7 +354,7 @@ const ItemDetailsScreen = ({
           <Text
             style={[
               tw`text-center text-black`,
-              { fontFamily: "Sora-SemiBold" },
+              { fontFamily: "Sora-light" },
             ]}
           >
             {selectedCategory.title || "Select Category"}
@@ -279,7 +396,7 @@ const ItemDetailsScreen = ({
               ]}
               onPress={() => handleNumberPress(num.toString())}
             >
-              <Text style={[tw`text-3xl`, { fontFamily: "Sora-Bold" }]}>
+              <Text style={[tw`text-3xl`, { fontFamily: "Sora-Regular" }]}>
                 {num}
               </Text>
             </TouchableOpacity>
@@ -298,6 +415,30 @@ const ItemDetailsScreen = ({
         </View>
       </View>
 
+      {/* Split Button */}
+      <View style={tw`flex-row mb-8 w-95% justify-between items-center`}>
+        <TouchableOpacity
+          style={tw`flex-row items-center gap-x-2`}
+          onPress={() => {
+            if (!isSplit) {
+              handleSplitPress();
+            } else {
+              setIsSplit(false);
+              setSplitUsers([{ id: 1, percentage: 100, amount: 0 }]);
+            }
+          }}
+        >
+          <Text style={[tw`text-center text-black`, { fontFamily: "Sora-Regular" }]}>
+            {isSplit ? "Split enabled" : "Split with others"}
+          </Text>
+          {isSplit ? (
+            <Ionicons name="radio-button-on-outline" size={20} color="black" />
+          ) : (
+            <Ionicons name="radio-button-off-outline" size={20} color="black" />
+          )}
+        </TouchableOpacity>
+      </View>
+
       {/* Save Button */}
       <TouchableOpacity
         style={tw`bg-blue-500 rounded-full w-95% py-3 px-6 mt-4 mx-4`}
@@ -305,6 +446,34 @@ const ItemDetailsScreen = ({
       >
         <Text style={tw`text-white text-center text-lg`}>Save</Text>
       </TouchableOpacity>
+
+      <View style={tw`mb-4`}>
+        {isSplit && (
+          <View style={tw`bg-gray-50 rounded-lg p-3 mb-2`}>
+            <View style={tw`flex-row justify-between items-center mb-2`}>
+              <Text style={[tw`text-gray-600`, { fontFamily: "Sora-Regular" }]}>
+                Split between {splitUsers.length} people
+              </Text>
+              <TouchableOpacity onPress={handleSplitPress}>
+                <Text style={[tw`text-blue-500`, { fontFamily: "Sora-Regular" }]}>
+                  Edit
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {splitUsers.map((user, index) => (
+              <Text 
+                key={user.id} 
+                style={[
+                  tw`text-gray-500 text-sm`, 
+                  { fontFamily: "Sora-Regular" }
+                ]}
+              >
+                Person {user.id}: ${user.amount.toFixed(2)} ({user.percentage.toFixed(1)}%)
+              </Text>
+            ))}
+          </View>
+        )}
+      </View>
 
       <ActionSheet ref={actionSheetRef}>
         <View style={tw`p-4`}>
@@ -382,7 +551,7 @@ const ItemDetailsScreen = ({
           <Text
             style={[
               tw`text-lg mb-4 text-center`,
-              { fontFamily: "Sora-SemiBold" },
+              { fontFamily: "Sora-Regular" },
             ]}
           >
             Select Frequency of this{" "}
@@ -399,6 +568,81 @@ const ItemDetailsScreen = ({
               </Text>
             </TouchableOpacity>
           ))}
+        </View>
+      </ActionSheet>
+
+      <ActionSheet ref={splitActionSheetRef}>
+        <View style={tw`p-4`}>
+          <Text style={[tw`text-xl mb-4 text-center font-bold`, { fontFamily: "Sora-Regular" }]}>
+            Split Amount: ${parseFloat(amount).toFixed(2)}
+          </Text>
+          
+          {splitUsers.map((user, index) => (
+            <View key={user.id} style={tw`mb-6`}>
+              <View style={tw`flex-row justify-between mb-2`}>
+                <Text style={[tw`text-lg`, { fontFamily: "Sora-Regular" }]}>
+                  Person {user.id}
+                </Text>
+                <Text style={[tw`text-lg font-bold`, { fontFamily: "Sora-Regular" }]}>
+                  ${user.amount.toFixed(2)} ({user.percentage.toFixed(1)}%)
+                </Text>
+              </View>
+              
+              <Slider
+                value={user.percentage}
+                onValueChange={(value) => handleSliderChange(value, user.id)}
+                minimumValue={0}
+                maximumValue={100}
+                step={0.5}
+                thumbTintColor="#3b82f6"
+                minimumTrackTintColor="#3b82f6"
+                maximumTrackTintColor="#e5e7eb"
+                tapToSeek={true}
+              />
+              
+              {/* Checkpoint markers */}
+              <View style={tw`flex-row justify-between mt-1`}>
+                {SPLIT_CHECKPOINTS.map((checkpoint) => (
+                  <TouchableOpacity
+                    key={checkpoint.value}
+                    onPress={() => handleSliderChange(checkpoint.value, user.id)}
+                    style={tw`items-center`}
+                  >
+                    <View style={tw`w-0.5 h-2 bg-gray-400 mb-1`} />
+                    <Text style={[
+                      tw`text-xs text-gray-500`,
+                      { fontFamily: "Sora-Regular" }
+                    ]}>
+                      {checkpoint.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ))}
+          
+          {splitUsers.length < 5 && (
+            <TouchableOpacity
+              style={tw`bg-gray-200 rounded-full py-3 px-4 mt-4`}
+              onPress={handleAddUser}
+            >
+              <Text style={[tw`text-center text-lg`, { fontFamily: "Sora-Regular" }]}>
+                Add Person
+              </Text>
+            </TouchableOpacity>
+          )}
+          
+          <TouchableOpacity
+            style={tw`bg-blue-500 rounded-full py-3 px-4 mt-4`}
+            onPress={() => {
+              setIsSplit(true);
+              splitActionSheetRef.current?.hide();
+            }}
+          >
+            <Text style={[tw`text-white text-center text-lg`, { fontFamily: "Sora-Regular" }]}>
+              Confirm Split
+            </Text>
+          </TouchableOpacity>
         </View>
       </ActionSheet>
     </View>
